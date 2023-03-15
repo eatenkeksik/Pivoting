@@ -88,7 +88,7 @@ int main(int argc, char **argv)
             }
             if(FD_ISSET(remote_socket, &set)) {
                 char buf[1024];
-                ssize_t bytes_read = recv(remote_socket,
+                ssize_t bytes_read = recv(remote_socket, buf, sizeof(buf), 0);
                 if(bytes_read <= 0) break;
                 send(client_socket, buf, bytes_read, 0);
             }
