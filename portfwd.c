@@ -1,90 +1,105 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
-#include <string.h>
 #include <sys/socket.h>
-#include <arpa/inet.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
+#include <string.h>
+#include <unistd.h>
 
-#define REMOTE_PORT 8080
-#define LOCAL_PORT 8888
-
-int main(int argc, char *argv[]) {
-    int remote_socket, local_socket, remote_client_socket;
-    struct sockaddr_in remote_addr, local_addr, remote_client_addr;
-    int addr_len = sizeof(struct sockaddr_in);
-    char buffer[1024];
-
-    if ((remote_socket = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-        perror("Failed to create socket");
-        exit(EXIT_FAILURE);
+int main(int argc, char **argv)
+{
+    if(argc < 4) {
+        fprintf(stderr, "Usage: %s <local_port> <remote_host> <remote_port>\n", argv[0]);
+        return -1;
     }
 
-    if ((local_socket = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-        perror("Failed to create socket");
-        exit(EXIT_FAILURE);
+    int local_port = atoi(argv[1]);
+    char *remote_host = argv[2];
+    int remote_port = atoi(argv[3]);
+
+    int local_socket = socket(AF_INET, SOCK_STREAM, 0);
+    if(local_socket == -1) {
+        perror("socket() failed");
+        return -1;
     }
 
-    memset(&remote_addr, 0, addr_len);
-    remote_addr.sin_family = AF_INET;
-    remote_addr.sin_port = htons(REMOTE_PORT);
-    remote_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
-
-    memset(&local_addr, 0, addr_len);
-    local_addr.sin_family = AF_INET;
-    local_addr.sin_port = htons(LOCAL_PORT);
-    local_addr.sin_addr.s_addr = INADDR_ANY;
-
-    if (bind(local_socket, (struct sockaddr *)&local_addr, addr_len) < 0) {
-        perror("Failed to bind socket");
-        exit(EXIT_FAILURE);
+    struct sockaddr_in local_addr = {
+        .sin_family = AF_INET,
+        .sin_port = htons(local_port),
+        .sin_addr.s_addr = INADDR_ANY
+    };
+    if(bind(local_socket, (struct sockaddr*)&local_addr, sizeof(local_addr)) == -1) {
+        perror("bind() failed");
+        close(local_socket);
+        return -1;
     }
 
-    if (listen(local_socket, 3) < 0) {
-        perror("Failed to listen on socket");
-        exit(EXIT_FAILURE);
+    if(listen(local_socket, 5) == -1) {
+        perror("listen() failed");
+        close(local_socket);
+        return -1;
     }
 
-    printf("Listening for incoming connections on port %d...\n", LOCAL_PORT);
+    printf("Port forwarding started: localhost:%d -> %s:%d\n", local_port, remote_host, remote_port);
 
-    if ((remote_client_socket = accept(local_socket, (struct sockaddr *)&remote_client_addr, (socklen_t*)&addr_len)) < 0) {
-        perror("Failed to accept connection");
-        exit(EXIT_FAILURE);
-    }
-
-    printf("Accepted connection from %s:%d\n", inet_ntoa(remote_client_addr.sin_addr), ntohs(remote_client_addr.sin_port));
-
-    if (connect(remote_socket, (struct sockaddr *)&remote_addr, addr_len) < 0) {
-        perror("Failed to connect to remote machine");
-        exit(EXIT_FAILURE);
-    }
-
-    printf("Connected to remote machine at %s:%d\n", inet_ntoa(remote_addr.sin_addr), ntohs(remote_addr.sin_port));
-
-    while (1) {
-        int num_bytes_read = read(remote_client_socket, buffer, sizeof(buffer));
-
-        if (num_bytes_read <= 0) {
-            break;
+    while(1) {
+        struct sockaddr_in client_addr;
+        socklen_t client_addr_len = sizeof(client_addr);
+        int client_socket = accept(local_socket, (struct sockaddr*)&client_addr, &client_addr_len);
+        if(client_socket == -1) {
+            perror("accept() failed");
+            continue;
+        }
+        int remote_socket = socket(AF_INET, SOCK_STREAM, 0);
+        if(remote_socket == -1) {
+            perror("socket() failed");
+            close(client_socket);
+            continue;
+        }
+        struct sockaddr_in remote_addr = {
+            .sin_family = AF_INET,
+            .sin_port = htons(remote_port),
+            .sin_addr.s_addr = inet_addr(remote_host)
+        };
+        if(connect(remote_socket, (struct sockaddr*)&remote_addr, sizeof(remote_addr)) == -1) {
+            perror("connect() failed");
+            close(client_socket);
+            close(remote_socket);
+            continue;
         }
 
-        write(remote_socket, buffer, num_bytes_read);
-        memset(buffer, 0, sizeof(buffer));
+        printf("New connection: %s:%d -> %s:%d\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port), remote_host, remote_port);
 
-        num_bytes_read = read(remote_socket, buffer, sizeof(buffer));
-
-        if (num_bytes_read <= 0) {
-            break;
+        fd_set set;
+        FD_ZERO(&set);
+        int max_fd = (client_socket > remote_socket) ? client_socket : remote_socket;
+        while(1) {
+            FD_SET(client_socket, &set);
+            FD_SET(remote_socket, &set);
+            if(select(max_fd + 1, &set, NULL, NULL, NULL) == -1) {
+                perror("select() failed");
+                break;
+            }
+            if(FD_ISSET(client_socket, &set)) {
+                char buf[1024];
+                ssize_t bytes_read = recv(client_socket, buf, sizeof(buf), 0);
+                if(bytes_read <= 0) break;
+                send(remote_socket, buf, bytes_read, 0);
+            }
+            if(FD_ISSET(remote_socket, &set)) {
+                char buf[1024];
+                ssize_t bytes_read = recv(remote_socket,
+                if(bytes_read <= 0) break;
+                send(client_socket, buf, bytes_read, 0);
+            }
         }
 
-        write(remote_client_socket, buffer, num_bytes_read);
-        memset(buffer, 0, sizeof(buffer));
+        printf("Connection closed: %s:%d -> %s:%d\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port), remote_host, remote_port);
+
+        close(client_socket);
+        close(remote_socket);
     }
 
-    printf("Connection closed\n");
-
-    close(remote_client_socket);
-    close(remote_socket);
     close(local_socket);
 
     return 0;
