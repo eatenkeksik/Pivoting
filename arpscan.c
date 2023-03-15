@@ -43,11 +43,12 @@ int main(int argc, char **argv)
     request.arp_ha.sa_family = ARPHRD_ETHER;
     memcpy(request.arp_ha.sa_data, mac_addr, 6);
     request.arp_flags = ATF_COM;
-    struct sockaddr broadcast_addr;
+
+    struct sockaddr_in broadcast_addr;
     memset(&broadcast_addr, 0, sizeof(broadcast_addr));
-    broadcast_addr.sa_family = AF_INET;
-    ((struct sockaddr_in *)&broadcast_addr)->sin_addr.s_addr = htonl(INADDR_BROADCAST);
-    if(sendto(sockfd, &request, sizeof(request), 0, &broadcast_addr, sizeof(broadcast_addr)) < 0) {
+    broadcast_addr.sin_family = AF_INET;
+    broadcast_addr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+    if(sendto(sockfd, &request, sizeof(request), 0, (struct sockaddr *)&broadcast_addr, sizeof(broadcast_addr)) < 0) {
         perror("sendto");
         close(sockfd);
         return -1;
