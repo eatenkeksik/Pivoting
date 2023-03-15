@@ -39,7 +39,7 @@ int main(int argc, char **argv)
     struct arpreq request;
     memset(&request, 0, sizeof(request));
     request.arp_pa.sa_family = AF_INET;
-    inet_pton(AF_INET, ip_addr, &(request.arp_pa.sin_addr));
+    ((struct sockaddr_in *)&request.arp_pa)->sin_addr.s_addr = inet_addr(ip_addr);
     request.arp_ha.sa_family = ARPHRD_ETHER;
     memcpy(request.arp_ha.sa_data, mac_addr, 6);
     request.arp_flags = ATF_COM;
