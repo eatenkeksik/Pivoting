@@ -9,6 +9,7 @@
 #include <sys/ioctl.h>
 #include <string.h>
 #include <errno.h>
+#include <net/if.h>
 
 int main(int argc, char** argv) {
   int tun_fd = open("/dev/net/tun", O_RDWR);
